@@ -26,7 +26,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='network_test_tools_v1.0',
+    name='network_test_tools_v1.1',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
