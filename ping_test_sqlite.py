@@ -16,7 +16,10 @@ from datetime import datetime
 
 DB_FILE = "ping_log.db"
 PING_HOST = "8.8.8.8"  # Google DNS, change if needed
-INTERVAL = 15  # seconds
+PING_INTERVAL = 1  # seconds
+REFRESH_INTERVAL = 500  # milliseconds for GUI refresh
+CART_LIMIT = 50  # Limit for chart data points
+LOGS_LIMIT = 20  # Limit for logs in the table
 
 def ping(host):
     try:
@@ -100,15 +103,101 @@ def fetch_fail_logs(limit=20):
     conn.close()
     return rows[::-1]  # reverse to show oldest first
 
+def save_settings_to_db(ping_interval, refresh_interval, cart_limit, logs_limit):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY,
+            ping_interval REAL,
+            refresh_interval INTEGER,
+            cart_limit INTEGER,
+            logs_limit INTEGER
+        )
+    """)
+    # Always keep only one row (id=1)
+    c.execute("""
+        INSERT INTO settings (id, ping_interval, refresh_interval, cart_limit, logs_limit)
+        VALUES (1, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            ping_interval=excluded.ping_interval,
+            refresh_interval=excluded.refresh_interval,
+            cart_limit=excluded.cart_limit,
+            logs_limit=excluded.logs_limit
+    """, (ping_interval, refresh_interval, cart_limit, logs_limit))
+    conn.commit()
+    conn.close()
+
+def load_settings_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY,
+            ping_interval REAL,
+            refresh_interval INTEGER,
+            cart_limit INTEGER,
+            logs_limit INTEGER
+        )
+    """)
+    c.execute("SELECT ping_interval, refresh_interval, cart_limit, logs_limit FROM settings WHERE id=1")
+    row = c.fetchone()
+    conn.close()
+    if row and all(x is not None for x in row):
+        return float(row[0]), int(row[1]), int(row[2]), int(row[3])
+    else:
+        return PING_INTERVAL, REFRESH_INTERVAL, CART_LIMIT, LOGS_LIMIT
+    
 class PingApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Ping Monitor")
-        self.geometry("600x850")
+        self.geometry("1000x850")
         self.resizable(True, True)
 
+        # Main content frame (left)
+        main_frame = tk.Frame(self)
+        main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Settings frame (right)
+        self.settings_frame = tk.Frame(self, relief=tk.RIDGE, borderwidth=2, width=300)
+        self.settings_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
+        self.settings_frame.pack_propagate(False)  # Prevent frame from shrinking below width
+
+        tk.Label(self.settings_frame, text="Settings", font=("Arial", 14, "bold")).pack(pady=(10, 20))
+
+        tk.Label(self.settings_frame, text="Ping Interval (s):", font=("Arial", 12)).pack(anchor="w")
+        self.ping_interval_var = tk.StringVar(value=str(PING_INTERVAL))
+        ping_entry = tk.Entry(self.settings_frame, textvariable=self.ping_interval_var)
+        ping_entry.pack(pady=(0, 10), anchor="w", fill="x")
+
+        tk.Label(self.settings_frame, text="Refresh Interval (ms):", font=("Arial", 12)).pack(anchor="w")
+        self.refresh_interval_var = tk.StringVar(value=str(REFRESH_INTERVAL))
+        refresh_entry = tk.Entry(self.settings_frame, textvariable=self.refresh_interval_var)
+        refresh_entry.pack(pady=(0, 10), anchor="w", fill="x")
+
+        tk.Label(self.settings_frame, text="Chart Limit:", font=("Arial", 12)).pack(anchor="w")
+        self.cart_limit_var = tk.StringVar(value=str(CART_LIMIT))
+        cart_entry = tk.Entry(self.settings_frame, textvariable=self.cart_limit_var)
+        cart_entry.pack(pady=(0, 10), anchor="w", fill="x")
+
+        tk.Label(self.settings_frame, text="Logs Limit:", font=("Arial", 12)).pack(anchor="w")
+        self.logs_limit_var = tk.StringVar(value=str(LOGS_LIMIT))
+        logs_entry = tk.Entry(self.settings_frame, textvariable=self.logs_limit_var)
+        logs_entry.pack(pady=(0, 10), anchor="w", fill="x")
+
+        confirm_btn = tk.Button(self.settings_frame, text="Confirm", command=self.update_intervals, bg="#4CAF50", fg="white")
+        confirm_btn.pack(pady=(20, 10))
+
+        self.status_label = tk.Label(self.settings_frame, text="", fg="blue", font=("Arial", 10))
+        self.status_label.pack()
+
+        # Button to show/hide settings
+        self.toggle_btn = tk.Button(self, text="<", command=self.toggle_settings)
+        self.toggle_btn.place(relx=0.97, rely=0.02, anchor="ne")  # Place at top-right, outside settings_frame
+
         # Statistics frame
-        stats_frame = tk.Frame(self)
+        stats_frame = tk.Frame(main_frame)
         stats_frame.pack(fill=tk.X, padx=10, pady=(10, 0))
 
         self.total_label = tk.Label(stats_frame, text="Total: 0", font=("Arial", 12))
@@ -121,13 +210,13 @@ class PingApp(tk.Tk):
         self.percent_label.pack(side=tk.LEFT, padx=10)
 
         # Statistics frame2
-        stats_frame2 = tk.Frame(self)
+        stats_frame2 = tk.Frame(main_frame)
         stats_frame2.pack(fill=tk.X, padx=10, pady=(10, 0))
         self.rap = tk.Label(stats_frame2, text="Recent average ping: 0.00ms", font=("Arial", 12))
         self.rap.pack(side=tk.LEFT, padx=10)
 
         # Chart frame
-        chart_frame = tk.Frame(self)
+        chart_frame = tk.Frame(main_frame)
         chart_frame.pack(fill=tk.BOTH, expand=False, padx=10, pady=(10, 0))
 
         # Matplotlib Figure
@@ -147,8 +236,8 @@ class PingApp(tk.Tk):
         # Connect matplotlib event for hover
         self.canvas.mpl_connect("motion_notify_event", self.on_chart_hover)
 
-        # # Table frame for all logs
-        table_frame = tk.Frame(self)
+        # Table frame for all logs
+        table_frame = tk.Frame(main_frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         columns = ("timestamp", "success", "latency_ms")
@@ -162,9 +251,9 @@ class PingApp(tk.Tk):
         self.tree.pack(fill=tk.BOTH, expand=True)
 
         # Table frame for fail logs only
-        fail_table_label = tk.Label(self, text="Failed Pings", font=("Arial", 12, "bold"), fg="red")
+        fail_table_label = tk.Label(main_frame, text="Failed Pings", font=("Arial", 12, "bold"), fg="red")
         fail_table_label.pack(pady=(5, 0))
-        fail_table_frame = tk.Frame(self)
+        fail_table_frame = tk.Frame(main_frame)
         fail_table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
         self.fail_tree = ttk.Treeview(fail_table_frame, columns=columns, show="headings")
@@ -181,7 +270,20 @@ class PingApp(tk.Tk):
         self.tree.tag_configure("fail", foreground="red")
         self.fail_tree.tag_configure("fail", foreground="red")
 
-        self.after(1000, self.refresh_table_and_chart)
+        self.after(REFRESH_INTERVAL, self.refresh_table_and_chart)
+        
+        # Ensure app termination on close
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def toggle_settings(self):
+        if self.settings_frame.winfo_ismapped():
+            self.settings_frame.pack_forget()
+            self.toggle_btn.config(text=">")
+        else:
+            self.settings_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
+            self.toggle_btn.config(text="<")
+        # Always keep toggle_btn at the same place
+        self.toggle_btn.place(relx=0.97, rely=0.02, anchor="ne")
 
     def on_chart_hover(self, event):
         # Only show tooltip if mouse is over a point
@@ -221,9 +323,9 @@ class PingApp(tk.Tk):
 
         # fetch logs
         no_logs = 20
-        latest_logs_for_chart = fetch_latest_logs_for_chart(50)  # Fetch more for charting
-        latest_logs = fetch_latest_logs(no_logs)
-        fail_logs = fetch_fail_logs(no_logs)
+        latest_logs_for_chart = fetch_latest_logs_for_chart(CART_LIMIT)  # Fetch more for charting
+        latest_logs = fetch_latest_logs(LOGS_LIMIT)
+        fail_logs = fetch_fail_logs(LOGS_LIMIT)
 
         # Update recent average ping
         self.rap.config(text="Recent average ping: {:.2f} ms".format(
@@ -268,8 +370,39 @@ class PingApp(tk.Tk):
         self.fig.tight_layout()
         self.canvas.draw()
 
-        self.after(5000, self.refresh_table_and_chart)
+        self.after(REFRESH_INTERVAL, self.refresh_table_and_chart)
 
+    def update_intervals(self):
+        global PING_INTERVAL, REFRESH_INTERVAL, CART_LIMIT, LOGS_LIMIT
+        try:
+            ping_val = float(self.ping_interval_var.get())
+            refresh_val = int(self.refresh_interval_var.get())
+            cart_val = int(self.cart_limit_var.get())
+            logs_val = int(self.logs_limit_var.get())
+            if ping_val <= 0:
+                raise ValueError("PING_INTERVAL must be positive.")
+            if refresh_val <= 0:
+                raise ValueError("REFRESH_INTERVAL must be positive.")
+            if cart_val <= 0:
+                raise ValueError("CART_LIMIT must be positive.")
+            if logs_val <= 0:
+                raise ValueError("LOGS_LIMIT must be positive.")
+            PING_INTERVAL = ping_val
+            REFRESH_INTERVAL = refresh_val
+            CART_LIMIT = cart_val
+            LOGS_LIMIT = logs_val
+            save_settings_to_db(PING_INTERVAL, REFRESH_INTERVAL, CART_LIMIT, LOGS_LIMIT)
+            self.status_label.config(text="Updated!", fg="green")
+        except ValueError as ve:
+            self.status_label.config(text=f"Invalid input: {ve}", fg="red")
+        except Exception as e:
+            self.status_label.config(text=f"Error: {e}", fg="red")
+
+    def on_close(self):
+            # Properly terminate the app and all threads
+            self.destroy()
+            import os
+            os._exit(0)
 
 async def ping_loop_async():
     loop = asyncio.get_event_loop()
@@ -278,14 +411,17 @@ async def ping_loop_async():
         # Run ping in a thread to avoid blocking the event loop
         success, latency = await loop.run_in_executor(None, ping, PING_HOST)
         await loop.run_in_executor(None, log_to_sqlite, now, success, latency)
-        print(f"{now} | Success: {success} | Latency: {latency} ms")
-        await asyncio.sleep(INTERVAL)
-
+        # print(f"{now} | Success: {success} | Latency: {latency} ms")
+        await asyncio.sleep(PING_INTERVAL)
 
 def start_async_ping_loop():
     asyncio.run(ping_loop_async())
 
 def main():
+    # get settings from database or use defaults
+    global PING_INTERVAL, REFRESH_INTERVAL, CART_LIMIT, LOGS_LIMIT
+    PING_INTERVAL, REFRESH_INTERVAL, CART_LIMIT, LOGS_LIMIT = load_settings_from_db()
+
     # Start ping loop in a background thread
     t = threading.Thread(target=start_async_ping_loop, daemon=True)
     t.start()

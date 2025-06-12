@@ -1,5 +1,7 @@
 # Network Test Tools
 
+A monitoring tool, ping Google constantly, store data in sqlite
+
 ![alt text](https://raw.githubusercontent.com/akh826/network-test-tools/refs/heads/main/screen.png)
 
 ## run code
