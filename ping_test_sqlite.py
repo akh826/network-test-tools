@@ -61,7 +61,7 @@ def log_to_sqlite(timestamp, success, latency):
 def fetch_latest_logs(limit=20):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT timestamp, success, latency_ms FROM ping_log ORDER BY id DESC LIMIT ?", (limit,))
+    c.execute("SELECT id, timestamp, success, latency_ms FROM ping_log ORDER BY id DESC LIMIT ?", (limit,))
     rows = c.fetchall()
     conn.close()
     return rows[::-1]  # reverse to show oldest first
@@ -98,7 +98,7 @@ def fetch_stats():
 def fetch_fail_logs(limit=20):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT timestamp, success, latency_ms FROM ping_log WHERE success=0 ORDER BY id DESC LIMIT ?", (limit,))
+    c.execute("SELECT id, timestamp, success, latency_ms FROM ping_log WHERE success=0 ORDER BY id DESC LIMIT ?", (limit,))
     rows = c.fetchall()
     conn.close()
     return rows[::-1]  # reverse to show oldest first
@@ -240,11 +240,13 @@ class PingApp(tk.Tk):
         table_frame = tk.Frame(main_frame)
         table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        columns = ("timestamp", "success", "latency_ms")
+        columns = ("id", "timestamp", "success", "latency_ms")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
+        self.tree.heading("id", text="ID")
         self.tree.heading("timestamp", text="Timestamp")
         self.tree.heading("success", text="Success")
         self.tree.heading("latency_ms", text="Latency (ms)")
+        self.tree.column("id", width=60)
         self.tree.column("timestamp", width=200)
         self.tree.column("success", width=80)
         self.tree.column("latency_ms", width=100)
@@ -257,9 +259,11 @@ class PingApp(tk.Tk):
         fail_table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
         self.fail_tree = ttk.Treeview(fail_table_frame, columns=columns, show="headings")
+        self.fail_tree.heading("id", text="ID")
         self.fail_tree.heading("timestamp", text="Timestamp")
         self.fail_tree.heading("success", text="Success")
         self.fail_tree.heading("latency_ms", text="Latency (ms)")
+        self.fail_tree.column("id", width=60)
         self.fail_tree.column("timestamp", width=200)
         self.fail_tree.column("success", width=80)
         self.fail_tree.column("latency_ms", width=100)
@@ -329,14 +333,14 @@ class PingApp(tk.Tk):
 
         # Update recent average ping
         self.rap.config(text="Recent average ping: {:.2f} ms".format(
-            sum(latency for _, _, latency in latest_logs if latency is not None) / max(1, no_logs)
+            sum(latency for _, _, _, latency in latest_logs if latency is not None) / max(1, no_logs)
         ))
 
         # Update main table
         for row in self.tree.get_children():
             self.tree.delete(row)
         for row in latest_logs:
-            tag = "success" if row[1] else "fail"
+            tag = "success" if row[2] else "fail"
             self.tree.insert("", tk.END, values=row, tags=(tag,))
 
         # Update fail table
