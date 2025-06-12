@@ -8,3 +8,10 @@
 pip install -r requirements.txt
 python ping_test_sqlite.py
 ```
+
+## compile
+
+```bash
+pip install pyinstaller
+pyinstaller network_test_tools.spec
+```

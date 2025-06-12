@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
 
+
 DB_FILE = "ping_log.db"
 PING_HOST = "8.8.8.8"  # Google DNS, change if needed
 INTERVAL = 15  # seconds
@@ -104,7 +105,7 @@ class PingApp(tk.Tk):
         super().__init__()
         self.title("Ping Monitor")
         self.geometry("600x850")
-        self.resizable(False, False)
+        self.resizable(True, True)
 
         # Statistics frame
         stats_frame = tk.Frame(self)

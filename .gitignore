@@ -2,3 +2,5 @@
 /ping_log.db
 /ping_test_csv.py
 /venv
+/build
+/dist
