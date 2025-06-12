@@ -11,6 +11,8 @@ python ping_test_sqlite.py
 
 ## compile
 
+compiled on ubuntu for linux
+
 ```bash
 pip install pyinstaller
 pyinstaller network_test_tools.spec
