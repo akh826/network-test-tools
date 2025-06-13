@@ -397,6 +397,8 @@ class PingApp(tk.Tk):
             LOGS_LIMIT = logs_val
             save_settings_to_db(PING_INTERVAL, REFRESH_INTERVAL, CART_LIMIT, LOGS_LIMIT)
             self.status_label.config(text="Updated!", fg="green")
+            self.after_cancel(self._refresh_after_id) if hasattr(self, "_refresh_after_id") else None
+            self._refresh_after_id = self.after(100, self.refresh_table_and_chart)  # Force immediate GUI update
         except ValueError as ve:
             self.status_label.config(text=f"Invalid input: {ve}", fg="red")
         except Exception as e:
